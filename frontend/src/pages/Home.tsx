@@ -33,7 +33,7 @@ export default function Home() {
       const selectedFile = file;
       const created =
         mode === "paste"
-          ? await createStudySetFromText(text, "")
+          ? await createStudySetFromText(text)
           : await (async () => {
               if (!selectedFile) {
                 throw new Error("Missing upload file.");
@@ -43,7 +43,7 @@ export default function Home() {
                 selectedFile.type || "text/plain"
               );
               if (!url || !key) {
-                throw new Error("Upload flow not available.");
+                throw new Error("File upload is only available when connected to the backend API.");
               }
               const uploadRes = await fetch(url, {
                 method: "PUT",
@@ -55,11 +55,11 @@ export default function Home() {
               if (!uploadRes.ok) {
                 throw new Error("Failed to upload file.");
               }
-              return createStudySetFromUpload(key, "");
+              return createStudySetFromUpload(key);
             })();
       nav(`/study-sets/${created.id}`);
     } catch (e) {
-      setError("Failed to create quiz.");
+      setError(e instanceof Error ? e.message : "Failed to create quiz.");
     } finally {
       setIsCreating(false);
     }
@@ -108,6 +108,7 @@ export default function Home() {
             <div className="grid gap-2">
               <input
                 type="file"
+                accept=".txt,.pdf"
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                 className="w-full border border-gray-200 bg-white px-3 py-2 text-sm focus:border-black focus:outline-none"
               />

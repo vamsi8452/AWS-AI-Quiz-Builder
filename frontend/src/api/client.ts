@@ -177,12 +177,22 @@ export async function generateQuiz(studySetId: string) {
   }
   const text = ensureStudySetText(studySetId);
   const words = extractWords(text);
-  const questions = words.slice(0, 8).map((word, idx) => ({
-    question: `Which word appears in the study text? (${idx + 1})`,
-    choices: [word, "option B", "option C", "option D"],
-    answerIndex: 0,
-    explanation: `${word} appears in the text.`,
-  }));
+  const uniqueWords = [...new Set(words)];
+  const questions = uniqueWords.slice(0, 8).map((word, idx) => {
+    const distractors = uniqueWords.filter((w) => w !== word).slice(0, 3);
+    while (distractors.length < 3) {
+      distractors.push(["concept", "element", "process"][distractors.length] ?? "term");
+    }
+    const answerIndex = idx % 4;
+    const choices = [...distractors];
+    choices.splice(answerIndex, 0, word);
+    return {
+      question: `Which of the following terms appears in the study text?`,
+      choices,
+      answerIndex,
+      explanation: `"${word}" is present in the provided content.`,
+    };
+  });
   const quiz: Quiz = { quiz: questions, updatedAt: new Date().toISOString() };
   stores.quizzes[studySetId] = quiz;
   persistStores(stores);
