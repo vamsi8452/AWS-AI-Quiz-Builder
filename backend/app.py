@@ -447,9 +447,25 @@ def _quality_filter_quiz(
 def _generate_quiz_with_llm(table, study_id: str, text: str) -> Optional[Dict[str, Any]]:
     if USE_MOCK_QUIZ:
         return _build_fallback_quiz(text)
+
     client = _get_bedrock_client()
     if client is None:
         return _build_fallback_quiz(text) if ALLOW_FALLBACK else None
+
+    # Try multi-agent coordinator (Claude on Bedrock) first
+    try:
+        from agents.coordinator import run as _coordinator_run
+
+        def _retrieval_fn(query: str, top_k: int = RAG_TOP_K) -> list:
+            return _select_chunks_for_quiz(table, study_id, query, top_k)
+
+        result = _coordinator_run(text, _retrieval_fn)
+        if result and "quiz" in result:
+            return result
+    except Exception as exc:
+        logger.warning("coordinator failed, falling back to Nova Pro: %s", exc)
+        if DEBUG_MODEL_OUTPUT:
+            return {"_error": str(exc)}
     chunks = _select_chunks_for_quiz(table, study_id, text, RAG_TOP_K)
     if chunks:
         content = "\n\n".join(

@@ -12,3 +12,8 @@ output "dynamodb_table" {
   value       = aws_dynamodb_table.study_sets.name
   description = "DynamoDB table name."
 }
+
+output "lambda_function_name" {
+  value       = aws_lambda_function.api.function_name
+  description = "Lambda function name."
+}

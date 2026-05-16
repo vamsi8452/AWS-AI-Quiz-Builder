@@ -12,6 +12,8 @@ provider "aws" {
   region = var.aws_region
 }
 
+# ── S3 ────────────────────────────────────────────────────────────────────────
+
 resource "aws_s3_bucket" "uploads" {
   bucket = var.upload_bucket_name
 }
@@ -36,6 +38,8 @@ resource "aws_s3_bucket_cors_configuration" "uploads" {
   }
 }
 
+# ── DynamoDB ──────────────────────────────────────────────────────────────────
+
 resource "aws_dynamodb_table" "study_sets" {
   name         = var.dynamodb_table_name
   billing_mode = "PAY_PER_REQUEST"
@@ -53,6 +57,8 @@ resource "aws_dynamodb_table" "study_sets" {
   }
 }
 
+# ── IAM ───────────────────────────────────────────────────────────────────────
+
 resource "aws_iam_role" "lambda_role" {
   name = "${var.project_name}-lambda-role"
 
@@ -60,11 +66,9 @@ resource "aws_iam_role" "lambda_role" {
     Version = "2012-10-17"
     Statement = [
       {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
+        Action    = "sts:AssumeRole"
+        Effect    = "Allow"
+        Principal = { Service = "lambda.amazonaws.com" }
       }
     ]
   })
@@ -79,70 +83,66 @@ resource "aws_iam_role_policy" "lambda_policy" {
     Statement = [
       {
         Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
+        Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "arn:aws:logs:*:*:*"
       },
       {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:Scan",
-          "dynamodb:Query"
-        ]
+        Effect   = "Allow"
+        Action   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Scan", "dynamodb:Query"]
         Resource = aws_dynamodb_table.study_sets.arn
       },
       {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject"
-        ]
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject"]
         Resource = "${aws_s3_bucket.uploads.arn}/*"
       },
       {
         Effect = "Allow"
-        Action = [
-          "bedrock:InvokeModel"
-        ]
+        Action = ["bedrock:InvokeModel"]
         Resource = [
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/${var.text_model_id}",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/${var.embed_model_id}"
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/*",
+          "arn:aws:bedrock:${var.aws_region}:*:inference-profile/*"
         ]
       }
     ]
   })
 }
 
+# ── Lambda ────────────────────────────────────────────────────────────────────
+
 resource "aws_lambda_function" "api" {
   function_name = "${var.project_name}-api"
   role          = aws_iam_role.lambda_role.arn
   handler       = "app.handler"
   runtime       = "python3.11"
+  timeout       = var.lambda_timeout
+  memory_size   = var.lambda_memory_size
 
   filename         = var.lambda_zip_path
   source_code_hash = filebase64sha256(var.lambda_zip_path)
 
-  timeout = 30
-
   environment {
     variables = {
-      STUDY_TABLE_NAME    = aws_dynamodb_table.study_sets.name
-      UPLOAD_BUCKET       = aws_s3_bucket.uploads.bucket
-      BEDROCK_REGION      = var.bedrock_region
-      TITAN_TEXT_MODEL_ID = var.text_model_id
+      STUDY_TABLE_NAME     = aws_dynamodb_table.study_sets.name
+      UPLOAD_BUCKET        = aws_s3_bucket.uploads.bucket
+      BEDROCK_REGION       = var.bedrock_region
+      TITAN_TEXT_MODEL_ID  = var.text_model_id
       TITAN_EMBED_MODEL_ID = var.embed_model_id
-      RAG_TOP_K           = var.rag_top_k
+      COORDINATOR_MODEL_ID = var.coordinator_model_id
+      QUIZ_GEN_MODEL_ID    = var.quiz_gen_model_id
+      QC_MODEL_ID          = var.qc_model_id
+      RAG_TOP_K            = tostring(var.rag_top_k)
+      USE_MOCK_QUIZ        = "false"
+      ALLOW_FALLBACK       = "true"
+      DEBUG_MODEL_OUTPUT   = "false"
     }
   }
 }
 
+# ── API Gateway ───────────────────────────────────────────────────────────────
+
 resource "aws_apigatewayv2_api" "http_api" {
-  name          = "${var.project_name}-http-api"
+  name          = "${var.project_name}-api"
   protocol_type = "HTTP"
 
   cors_configuration {
@@ -155,9 +155,9 @@ resource "aws_apigatewayv2_api" "http_api" {
 }
 
 resource "aws_apigatewayv2_integration" "lambda" {
-  api_id           = aws_apigatewayv2_api.http_api.id
-  integration_type = "AWS_PROXY"
-  integration_uri  = aws_lambda_function.api.invoke_arn
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.api.invoke_arn
   payload_format_version = "2.0"
 }
 
@@ -174,10 +174,10 @@ locals {
 }
 
 resource "aws_apigatewayv2_route" "routes" {
-  for_each = toset(local.routes)
-  api_id   = aws_apigatewayv2_api.http_api.id
+  for_each  = toset(local.routes)
+  api_id    = aws_apigatewayv2_api.http_api.id
   route_key = each.value
-  target   = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
 resource "aws_apigatewayv2_stage" "default" {
